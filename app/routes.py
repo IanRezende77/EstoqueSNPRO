@@ -5,7 +5,7 @@ from io import StringIO
 from unicodedata import normalize
 from . import db
 from datetime import datetime
-from .models import Produto, Categoria, TipoProduto, Local, Movimentacao, DashboardGrafico
+from .models import Produto, Categoria, TipoProduto, Local, Movimentacao, DashboardGrafico, ImportacaoPlanilha
 
 main = Blueprint("main", __name__)
 
@@ -843,6 +843,7 @@ def relatorios():
     produtos_lista = Produto.query.order_by(Produto.nome.asc()).all()
     movimentacoes_lista = Movimentacao.query.order_by(Movimentacao.criado_em.desc()).all()
     baixo_estoque = Produto.query.filter(Produto.quantidade <= Produto.estoque_minimo).order_by(Produto.nome.asc()).all()
+    importacoes_count = ImportacaoPlanilha.query.count()
 
     return render_template(
         "relatorios.html",
@@ -851,6 +852,7 @@ def relatorios():
         produtos=produtos_lista,
         movimentacoes=movimentacoes_lista,
         baixo_estoque=baixo_estoque,
+        importacoes_count=importacoes_count,
     )
 
 
@@ -893,6 +895,7 @@ def importar_planilha():
         linhas = _ler_linhas_planilha(arquivo)
         importados = 0
         atualizados = 0
+        skus_importados = []
 
         for indice, linha in enumerate(linhas, start=1):
             sku = _texto_padrao(_valor_linha(linha, "sku", "codigo", "código", "cod", "Código"), _sku_auto(indice))
@@ -914,6 +917,8 @@ def importar_planilha():
                 db.session.add(Local(nome=local, endereco="Importado da planilha", descricao="Importado da planilha", status="Ativo"))
 
             produto = Produto.query.filter_by(sku=sku).first()
+            skus_importados.append(sku)
+
             if produto:
                 produto.nome = nome
                 produto.categoria = categoria
@@ -941,11 +946,76 @@ def importar_planilha():
                 db.session.add(produto)
                 importados += 1
 
+        registro_importacao = ImportacaoPlanilha(
+            nome_arquivo=arquivo.filename,
+            produtos_skus="\n".join(sorted(set(skus_importados))),
+            total_novos=importados,
+            total_atualizados=atualizados,
+            criado_em=datetime.now(),
+        )
+        db.session.add(registro_importacao)
+
         db.session.commit()
         flash(f"Importacao concluida: {importados} produtos novos e {atualizados} atualizados.", "success")
     except Exception as erro:
         db.session.rollback()
         flash(f"Erro ao importar planilha: {erro}", "error")
+
+    return redirect(url_for("main.relatorios"))
+
+
+@main.route("/relatorios/importacoes/apagar", methods=["POST"])
+def apagar_dados_importados():
+    try:
+        importacoes = ImportacaoPlanilha.query.all()
+        skus = set()
+        for importacao in importacoes:
+            for sku in (importacao.produtos_skus or "").splitlines():
+                sku = sku.strip()
+                if sku:
+                    skus.add(sku)
+
+        if not skus:
+            categorias_importadas = [c.nome for c in Categoria.query.filter_by(descricao="Importado da planilha").all()]
+            tipos_importados = [t.nome for t in TipoProduto.query.filter_by(descricao="Importado da planilha").all()]
+            locais_importados = [l.nome for l in Local.query.filter_by(descricao="Importado da planilha").all()]
+            produtos = Produto.query.filter(
+                or_(
+                    Produto.sku.like("AUTO-%"),
+                    Produto.categoria.in_(categorias_importadas or ["__sem_categoria_importada__"]),
+                    Produto.tipo_produto.in_(tipos_importados or ["__sem_tipo_importado__"]),
+                    Produto.local.in_(locais_importados or ["__sem_local_importado__"]),
+                )
+            ).all()
+        else:
+            produtos = Produto.query.filter(Produto.sku.in_(skus)).all()
+        produto_ids = [produto.id for produto in produtos]
+
+        if produto_ids:
+            Movimentacao.query.filter(Movimentacao.produto_id.in_(produto_ids)).delete(synchronize_session=False)
+
+        apagados = 0
+        for produto in produtos:
+            db.session.delete(produto)
+            apagados += 1
+
+        ImportacaoPlanilha.query.delete()
+
+        for categoria in Categoria.query.filter_by(descricao="Importado da planilha").all():
+            if not Produto.query.filter_by(categoria=categoria.nome).first():
+                db.session.delete(categoria)
+        for tipo in TipoProduto.query.filter_by(descricao="Importado da planilha").all():
+            if not Produto.query.filter_by(tipo_produto=tipo.nome).first():
+                db.session.delete(tipo)
+        for local in Local.query.filter_by(descricao="Importado da planilha").all():
+            if not Produto.query.filter_by(local=local.nome).first():
+                db.session.delete(local)
+
+        db.session.commit()
+        flash(f"Dados importados apagados com sucesso: {apagados} produtos removidos.", "success")
+    except Exception as erro:
+        db.session.rollback()
+        flash(f"Erro ao apagar dados importados: {erro}", "error")
 
     return redirect(url_for("main.relatorios"))
 

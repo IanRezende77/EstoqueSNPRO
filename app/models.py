@@ -1,4 +1,6 @@
 from . import db
+from datetime import datetime
+
 
 
 class Categoria(db.Model):
@@ -70,6 +72,17 @@ class Movimentacao(db.Model):
     criado_em = db.Column(db.DateTime, nullable=False)
 
     produto = db.relationship("Produto", backref="movimentacoes")
+
+
+class ImportacaoPlanilha(db.Model):
+    __tablename__ = "importacoes_planilha"
+
+    id = db.Column(db.Integer, primary_key=True)
+    nome_arquivo = db.Column(db.String(200), nullable=True)
+    produtos_skus = db.Column(db.Text, nullable=False, default="")
+    total_novos = db.Column(db.Integer, nullable=False, default=0)
+    total_atualizados = db.Column(db.Integer, nullable=False, default=0)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
 
 class DashboardGrafico(db.Model):

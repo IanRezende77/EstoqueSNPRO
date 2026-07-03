@@ -27,11 +27,15 @@
         </label>
         <button class="btn-primary" type="submit">Importar CSV/Excel</button>
     </form>
+
+    <form method="post" action="{{ url_for('main.apagar_dados_importados') }}" data-confirm-kind="dados importados" data-confirm-article="os" class="delete-import-form">
+        <button class="btn-danger" type="submit">Apagar importações</button>
+    </form>
 </div>
 
 <div class="import-help">
     <strong>Importação de produtos:</strong> a planilha pode ter colunas como Código/SKU, Nome, Categoria, Tipo, Local, Quantidade, Estoque Mínimo, Status e Descrição.
-    Campos vazios, nulos ou quebrados recebem valores padrão: quantidade 0, estoque mínimo 0, categoria "Sem Categoria", tipo "Sem Tipo", local "Estoque Principal" e status "Ativo". Se o SKU já existir, o produto será atualizado; se não existir, será criado.
+    Campos vazios, nulos ou quebrados recebem valores padrão: quantidade 0, estoque mínimo 0, categoria "Sem Categoria", tipo "Sem Tipo", local "Estoque Principal" e status "Ativo". Se o SKU já existir, o produto será atualizado; se não existir, será criado. O botão "Apagar importações" remove os produtos criados/atualizados pelas importações registradas.
 </div>
 
 {% if tipo == 'movimentacoes' %}
