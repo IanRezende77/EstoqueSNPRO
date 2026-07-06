@@ -5,26 +5,26 @@ from io import StringIO
 from unicodedata import normalize
 from . import db
 from datetime import datetime
-from .models import Produto, Categoria, TipoProduto, Local, Movimentacao, DashboardGrafico, ImportacaoPlanilha
+from .models import Produto, Equipamento, TipoProduto, Local, Movimentacao, DashboardGrafico, ImportacaoPlanilha
 
 main = Blueprint("main", __name__)
 
-CATEGORIAS_PADRAO = [
-    ("Periferico", "Itens como mouse, teclado, monitor, webcam e headset"),
+EQUIPAMENTOS_PADRAO = [
+    ("Periférico", "Itens como mouse, teclado, monitor, webcam e headset"),
     ("Desktop", "Computadores, gabinetes e equipamentos de mesa"),
     ("Notebook", "Notebooks, carregadores e componentes relacionados"),
-    ("Servidor", "Servidores, pecas e componentes de infraestrutura"),
+    ("Servidor", "Servidores, peças e componentes de infraestrutura"),
 ]
 
 TIPOS_PRODUTO_PADRAO = [
     ("SSD", "Unidades de estado solido"),
     ("Processador", "CPUs e componentes de processamento"),
-    ("Memoria", "Memorias RAM e modulos relacionados"),
-    ("Hard Disk", "Discos rigidos e armazenamentos magneticos"),
+    ("Memória", "Memórias RAM e módulos relacionados"),
+    ("Hard Disk", "Discos rígidos e armazenamentos magnéticos"),
 ]
 LOCAIS_PADRAO = [
     ("EP-Prateleira 3A", "Estoque Principal", "Prateleira principal para itens menores"),
-    ("EP-Prateleira 3B", "Estoque Principal", "Prateleira intermediaria do estoque"),
+    ("EP-Prateleira 3B", "Estoque Principal", "Prateleira intermediária do estoque"),
     ("EP-Prateleira 3C", "Estoque Principal", "Prateleira superior do estoque"),
 ]
 
@@ -48,6 +48,75 @@ def _normalizar_chave(valor):
     return valor.strip().lower().replace(" ", "_").replace("-", "_")
 
 
+def _corrigir_nome_tipo_produto(nome):
+    """Padroniza nomes comuns que vinham sem acento nas versões anteriores."""
+    texto = str(nome or "").strip()
+    if not texto:
+        return texto
+
+    correcoes = {
+        "memoria": "Memória",
+    }
+    return correcoes.get(_normalizar_chave(texto), texto)
+
+
+def _corrigir_texto_produto(nome):
+    texto = str(nome or "").strip()
+    return texto.replace("Memoria", "Memória").replace("memoria", "memória")
+
+
+def _aplicar_correcoes_padrao():
+    """Atualiza dados legados para manter o padrão visual com acentos.
+
+    Isso corrige bancos já criados com nomes antigos, como Memoria -> Memória.
+    Também evita duplicidade quando já existir uma linha antiga e uma nova.
+    """
+    alterou = False
+
+    correcoes_tipos = {
+        "Memoria": ("Memória", "Memórias RAM e módulos relacionados"),
+    }
+
+    for antigo, (novo, descricao) in correcoes_tipos.items():
+        antigo_obj = TipoProduto.query.filter_by(nome=antigo).first()
+        novo_obj = TipoProduto.query.filter_by(nome=novo).first()
+
+        if antigo_obj and novo_obj and antigo_obj.id != novo_obj.id:
+            Produto.query.filter_by(tipo_produto=antigo).update({"tipo_produto": novo})
+            db.session.delete(antigo_obj)
+            novo_obj.descricao = descricao
+            alterou = True
+        elif antigo_obj:
+            Produto.query.filter_by(tipo_produto=antigo).update({"tipo_produto": novo})
+            descricao_antiga = antigo_obj.descricao or ""
+            antigo_obj.nome = novo
+            if descricao_antiga.strip() in {"", "Memorias RAM e modulos relacionados"}:
+                antigo_obj.descricao = descricao
+            alterou = True
+        elif novo_obj and (novo_obj.descricao or "").strip() in {"", "Memorias RAM e modulos relacionados"}:
+            novo_obj.descricao = descricao
+            alterou = True
+
+    for produto in Produto.query.all():
+        novo_nome = _corrigir_texto_produto(produto.nome)
+        novo_tipo = _corrigir_nome_tipo_produto(produto.tipo_produto)
+        if produto.nome != novo_nome:
+            produto.nome = novo_nome
+            alterou = True
+        if produto.tipo_produto != novo_tipo:
+            produto.tipo_produto = novo_tipo
+            alterou = True
+
+    for movimentacao in Movimentacao.query.all():
+        novo_nome = _corrigir_texto_produto(movimentacao.produto_nome)
+        if movimentacao.produto_nome != novo_nome:
+            movimentacao.produto_nome = novo_nome
+            alterou = True
+
+    if alterou:
+        db.session.commit()
+
+
 def _impacto_estoque(tipo, quantidade):
     if tipo in ["Entrada", "Retorno"]:
         return quantidade
@@ -62,10 +131,10 @@ def _registrar_movimentacao(produto, tipo, quantidade, valor_unitario, local, ob
 
     impacto = _impacto_estoque(tipo, quantidade)
     if impacto < 0 and produto.quantidade + impacto < 0:
-        raise ValueError("quantidade indisponivel em estoque")
+        raise ValueError("quantidade indisponível em estoque")
 
     if tipo not in ["Entrada", "Saida", "Transferência", "Empréstimo", "Retorno", "Manutenção", "Descarte"]:
-        raise ValueError("tipo de movimentacao invalido")
+        raise ValueError("tipo de movimentação inválido")
 
     produto.quantidade += impacto
     if tipo == "Transferência" or local:
@@ -103,7 +172,7 @@ def _ler_linhas_planilha(arquivo):
         try:
             from openpyxl import load_workbook
         except Exception as erro:
-            raise RuntimeError("para importar Excel, instale a dependencia openpyxl com: pip install -r requirements.txt") from erro
+            raise RuntimeError("para importar Excel, instale a dependência openpyxl com: pip install -r requirements.txt") from erro
         wb = load_workbook(arquivo.stream, read_only=True, data_only=True)
         ws = wb.active
         linhas = list(ws.iter_rows(values_only=True))
@@ -117,7 +186,7 @@ def _ler_linhas_planilha(arquivo):
             dados.append({cabecalhos[i]: linha[i] if i < len(linha) else None for i in range(len(cabecalhos))})
         return dados
 
-    raise ValueError("formato invalido. Envie um arquivo .csv ou .xlsx")
+    raise ValueError("formato inválido. Envie um arquivo .csv ou .xlsx")
 
 
 
@@ -165,16 +234,16 @@ def _to_float(valor, padrao=0.0):
         return padrao
 
 
-def _garantir_categorias_padrao():
-    if Categoria.query.count() == 0:
-        for nome, descricao in CATEGORIAS_PADRAO:
-            db.session.add(Categoria(nome=nome, descricao=descricao, status="Ativo"))
+def _garantir_equipamentos_padrao():
+    if Equipamento.query.count() == 0:
+        for nome, descricao in EQUIPAMENTOS_PADRAO:
+            db.session.add(Equipamento(nome=nome, descricao=descricao, status="Ativo"))
         db.session.commit()
 
 
-def _nomes_categorias_ativas():
-    _garantir_categorias_padrao()
-    return [c.nome for c in Categoria.query.filter_by(status="Ativo").order_by(Categoria.nome.asc()).all()]
+def _nomes_equipamentos_ativas():
+    _garantir_equipamentos_padrao()
+    return [c.nome for c in Equipamento.query.filter_by(status="Ativo").order_by(Equipamento.nome.asc()).all()]
 
 
 def _garantir_tipos_padrao():
@@ -182,6 +251,7 @@ def _garantir_tipos_padrao():
         for nome, descricao in TIPOS_PRODUTO_PADRAO:
             db.session.add(TipoProduto(nome=nome, descricao=descricao, status="Ativo"))
         db.session.commit()
+    _aplicar_correcoes_padrao()
 
 
 def _nomes_tipos_ativos():
@@ -206,7 +276,7 @@ DASHBOARD_FONTES = {
         "nome": "Produtos",
         "model": Produto,
         "colunas": {
-            "categoria": Produto.categoria,
+            "equipamento": Produto.equipamento,
             "tipo_produto": Produto.tipo_produto,
             "local": Produto.local,
             "status": Produto.status,
@@ -219,7 +289,7 @@ DASHBOARD_FONTES = {
         "filtros": {
             "sku": Produto.sku,
             "nome": Produto.nome,
-            "categoria": Produto.categoria,
+            "equipamento": Produto.equipamento,
             "tipo_produto": Produto.tipo_produto,
             "local": Produto.local,
             "status": Produto.status,
@@ -251,7 +321,7 @@ DASHBOARD_FONTES = {
 }
 
 DASHBOARD_COLUNAS_LABEL = {
-    "categoria": "Categoria",
+    "equipamento": "Equipamento",
     "tipo_produto": "Tipo de Produto",
     "local": "Local",
     "status": "Status",
@@ -374,7 +444,7 @@ def _garantir_graficos_padrao():
     _limpar_graficos_antigos_de_valor()
     if DashboardGrafico.query.count() == 0:
         padroes = [
-            DashboardGrafico(titulo="Produtos por categoria", fonte="produtos", tipo_grafico="barra", coluna_grupo="categoria", metrica="contagem", criado_em=datetime.now()),
+            DashboardGrafico(titulo="Produtos por equipamento", fonte="produtos", tipo_grafico="barra", coluna_grupo="equipamento", metrica="contagem", criado_em=datetime.now()),
             DashboardGrafico(titulo="Produtos por local", fonte="produtos", tipo_grafico="barra", coluna_grupo="local", metrica="soma_quantidade", criado_em=datetime.now()),
             DashboardGrafico(titulo="Movimentacoes por tipo", fonte="movimentacoes", tipo_grafico="pizza", coluna_grupo="tipo", metrica="contagem", criado_em=datetime.now()),
         ]
@@ -384,7 +454,7 @@ def _garantir_graficos_padrao():
 
 @main.route("/dashboard")
 def dashboard():
-    _garantir_categorias_padrao()
+    _garantir_equipamentos_padrao()
     _garantir_tipos_padrao()
     _garantir_locais_padrao()
     _garantir_graficos_padrao()
@@ -418,7 +488,7 @@ def novo_grafico_dashboard():
             titulo=request.form.get("titulo") or "Grafico personalizado",
             fonte=request.form.get("fonte") or "produtos",
             tipo_grafico=request.form.get("tipo_grafico") or "barra",
-            coluna_grupo=request.form.get("coluna_grupo") or "categoria",
+            coluna_grupo=request.form.get("coluna_grupo") or "equipamento",
             metrica=request.form.get("metrica") or "contagem",
             filtro_coluna=request.form.get("filtro_coluna") or None,
             filtro_operador=request.form.get("filtro_operador") or None,
@@ -451,7 +521,7 @@ def index():
 @main.route("/produtos")
 def produtos():
     busca = request.args.get("busca", "").strip()
-    categoria = request.args.get("categoria", "").strip()
+    equipamento = request.args.get("equipamento", "").strip()
     local = request.args.get("local", "").strip()
     status = request.args.get("status", "").strip()
 
@@ -459,8 +529,8 @@ def produtos():
 
     if busca:
         query = query.filter(or_(Produto.nome.ilike(f"%{busca}%"), Produto.sku.ilike(f"%{busca}%")))
-    if categoria:
-        query = query.filter(Produto.categoria == categoria)
+    if equipamento:
+        query = query.filter(Produto.equipamento == equipamento)
     if local:
         query = query.filter(Produto.local == local)
     if status:
@@ -472,11 +542,11 @@ def produtos():
         "produtos.html",
         active_page="produtos",
         produtos=produtos_lista,
-        categorias=_nomes_categorias_ativas(),
+        equipamentos=_nomes_equipamentos_ativas(),
         tipos_produto=_nomes_tipos_ativos(),
         locais=_nomes_locais_ativos(),
         busca=busca,
-        categoria=categoria,
+        equipamento=equipamento,
         local=local,
         status=status,
     )
@@ -487,9 +557,9 @@ def novo_produto():
     try:
         produto = Produto(
             sku=request.form["sku"].strip(),
-            nome=request.form["nome"].strip(),
-            categoria=request.form["categoria"],
-            tipo_produto=request.form.get("tipo_produto") or None,
+            nome=_corrigir_texto_produto(request.form["nome"]),
+            equipamento=request.form["equipamento"],
+            tipo_produto=_corrigir_nome_tipo_produto(request.form.get("tipo_produto") or None),
             local=request.form["local"],
             quantidade=_int_form("quantidade", 1),
             estoque_minimo=_int_form("estoque_minimo", 1),
@@ -513,9 +583,9 @@ def editar_produto(produto_id):
 
     try:
         produto.sku = request.form["sku"].strip()
-        produto.nome = request.form["nome"].strip()
-        produto.categoria = request.form["categoria"]
-        produto.tipo_produto = request.form.get("tipo_produto") or None
+        produto.nome = _corrigir_texto_produto(request.form["nome"])
+        produto.equipamento = request.form["equipamento"]
+        produto.tipo_produto = _corrigir_nome_tipo_produto(request.form.get("tipo_produto") or None)
         produto.local = request.form["local"]
         produto.quantidade = _int_form("quantidade", 1)
         produto.estoque_minimo = _int_form("estoque_minimo", 1)
@@ -537,68 +607,68 @@ def excluir_produto(produto_id):
     produto = Produto.query.get_or_404(produto_id)
     db.session.delete(produto)
     db.session.commit()
-    flash("Produto excluido com sucesso.", "success")
+    flash("Produto excluído com sucesso.", "success")
     return redirect(url_for("main.produtos"))
 
 
-@main.route("/categorias")
-def categorias():
-    _garantir_categorias_padrao()
-    categorias_lista = Categoria.query.order_by(Categoria.nome.asc()).all()
-    return render_template("categorias.html", active_page="categorias", categorias=categorias_lista)
+@main.route("/equipamentos")
+def equipamentos():
+    _garantir_equipamentos_padrao()
+    equipamentos_lista = Equipamento.query.order_by(Equipamento.nome.asc()).all()
+    return render_template("equipamentos.html", active_page="equipamentos", equipamentos=equipamentos_lista)
 
 
-@main.route("/categorias/nova", methods=["POST"])
-def nova_categoria():
+@main.route("/equipamentos/nova", methods=["POST"])
+def nova_equipamento():
     try:
-        categoria = Categoria(
+        equipamento = Equipamento(
             nome=request.form["nome"].strip(),
             descricao=request.form.get("descricao") or None,
             status=request.form.get("status") or "Ativo",
         )
-        db.session.add(categoria)
+        db.session.add(equipamento)
         db.session.commit()
-        flash("Categoria cadastrada com sucesso.", "success")
+        flash("Equipamento cadastrado com sucesso.", "success")
     except Exception as erro:
         db.session.rollback()
-        flash(f"Erro ao cadastrar categoria: {erro}", "error")
-    return redirect(url_for("main.categorias"))
+        flash(f"Erro ao cadastrar equipamento: {erro}", "error")
+    return redirect(url_for("main.equipamentos"))
 
 
-@main.route("/categorias/editar/<int:categoria_id>", methods=["POST"])
-def editar_categoria(categoria_id):
-    categoria = Categoria.query.get_or_404(categoria_id)
-    nome_antigo = categoria.nome
+@main.route("/equipamentos/editar/<int:equipamento_id>", methods=["POST"])
+def editar_equipamento(equipamento_id):
+    equipamento = Equipamento.query.get_or_404(equipamento_id)
+    nome_antigo = equipamento.nome
 
     try:
-        categoria.nome = request.form["nome"].strip()
-        categoria.descricao = request.form.get("descricao") or None
-        categoria.status = request.form.get("status") or "Ativo"
+        equipamento.nome = request.form["nome"].strip()
+        equipamento.descricao = request.form.get("descricao") or None
+        equipamento.status = request.form.get("status") or "Ativo"
 
-        if nome_antigo != categoria.nome:
-            Produto.query.filter_by(categoria=nome_antigo).update({"categoria": categoria.nome})
+        if nome_antigo != equipamento.nome:
+            Produto.query.filter_by(equipamento=nome_antigo).update({"equipamento": equipamento.nome})
 
         db.session.commit()
-        flash("Categoria atualizada com sucesso.", "success")
+        flash("Equipamento atualizado com sucesso.", "success")
     except Exception as erro:
         db.session.rollback()
-        flash(f"Erro ao atualizar categoria: {erro}", "error")
-    return redirect(url_for("main.categorias"))
+        flash(f"Erro ao atualizar equipamento: {erro}", "error")
+    return redirect(url_for("main.equipamentos"))
 
 
-@main.route("/categorias/excluir/<int:categoria_id>", methods=["POST"])
-def excluir_categoria(categoria_id):
-    categoria = Categoria.query.get_or_404(categoria_id)
+@main.route("/equipamentos/excluir/<int:equipamento_id>", methods=["POST"])
+def excluir_equipamento(equipamento_id):
+    equipamento = Equipamento.query.get_or_404(equipamento_id)
 
-    produto_vinculado = Produto.query.filter_by(categoria=categoria.nome).first()
+    produto_vinculado = Produto.query.filter_by(equipamento=equipamento.nome).first()
     if produto_vinculado:
-        flash("Nao foi possivel excluir: existem produtos usando esta categoria.", "error")
-        return redirect(url_for("main.categorias"))
+        flash("Não foi possível excluir: existem produtos usando este equipamento.", "error")
+        return redirect(url_for("main.equipamentos"))
 
-    db.session.delete(categoria)
+    db.session.delete(equipamento)
     db.session.commit()
-    flash("Categoria excluida com sucesso.", "success")
-    return redirect(url_for("main.categorias"))
+    flash("Equipamento excluído com sucesso.", "success")
+    return redirect(url_for("main.equipamentos"))
 
 
 @main.route("/tipos-produto")
@@ -612,7 +682,7 @@ def tipos_produto():
 def novo_tipo_produto():
     try:
         tipo = TipoProduto(
-            nome=request.form["nome"].strip(),
+            nome=_corrigir_nome_tipo_produto(request.form["nome"]),
             descricao=request.form.get("descricao") or None,
             status=request.form.get("status") or "Ativo",
         )
@@ -631,7 +701,7 @@ def editar_tipo_produto(tipo_id):
     nome_antigo = tipo.nome
 
     try:
-        tipo.nome = request.form["nome"].strip()
+        tipo.nome = _corrigir_nome_tipo_produto(request.form["nome"])
         tipo.descricao = request.form.get("descricao") or None
         tipo.status = request.form.get("status") or "Ativo"
 
@@ -657,7 +727,7 @@ def excluir_tipo_produto(tipo_id):
 
     db.session.delete(tipo)
     db.session.commit()
-    flash("Tipo de produto excluido com sucesso.", "success")
+    flash("Tipo de produto excluído com sucesso.", "success")
     return redirect(url_for("main.tipos_produto"))
 
 
@@ -798,7 +868,7 @@ def editar_movimentacao(movimentacao_id):
 
         impacto = _impacto_estoque(tipo, quantidade)
         if impacto < 0 and produto.quantidade + impacto < 0:
-            raise ValueError("quantidade indisponivel em estoque para a correcao")
+            raise ValueError("quantidade indisponível em estoque para a correcao")
 
         produto.quantidade += impacto
         produto.local = local
@@ -871,9 +941,9 @@ def exportar_relatorio():
         lista = Produto.query
         if tipo == "baixo_estoque":
             lista = lista.filter(Produto.quantidade <= Produto.estoque_minimo)
-        writer.writerow(["Codigo", "Nome", "Categoria", "Tipo", "Local", "Quantidade", "Estoque Minimo", "Status", "Descricao"])
+        writer.writerow(["Codigo", "Nome", "Equipamento", "Tipo", "Local", "Quantidade", "Estoque Minimo", "Status", "Descricao"])
         for produto in lista.order_by(Produto.nome.asc()).all():
-            writer.writerow([produto.sku, produto.nome, produto.categoria, produto.tipo_produto or "", produto.local, produto.quantidade, produto.estoque_minimo, produto.status, produto.descricao or ""])
+            writer.writerow([produto.sku, produto.nome, produto.equipamento, produto.tipo_produto or "", produto.local, produto.quantidade, produto.estoque_minimo, produto.status, produto.descricao or ""])
         nome = "relatorio_baixo_estoque.csv" if tipo == "baixo_estoque" else "relatorio_produtos.csv"
 
     conteudo = "\ufeff" + saida.getvalue()
@@ -899,18 +969,18 @@ def importar_planilha():
 
         for indice, linha in enumerate(linhas, start=1):
             sku = _texto_padrao(_valor_linha(linha, "sku", "codigo", "código", "cod", "Código"), _sku_auto(indice))
-            nome = _texto_padrao(_valor_linha(linha, "nome", "produto", "nome_produto"), f"Produto importado {indice}")
+            nome = _corrigir_texto_produto(_texto_padrao(_valor_linha(linha, "nome", "produto", "nome_produto"), f"Produto importado {indice}"))
 
-            categoria = _texto_padrao(_valor_linha(linha, "categoria"), "Sem Categoria")
-            tipo_produto = _texto_padrao(_valor_linha(linha, "tipo", "tipo_produto"), "Sem Tipo")
+            equipamento = _texto_padrao(_valor_linha(linha, "equipamento"), "Sem Equipamento")
+            tipo_produto = _corrigir_nome_tipo_produto(_texto_padrao(_valor_linha(linha, "tipo", "tipo_produto"), "Sem Tipo"))
             local = _texto_padrao(_valor_linha(linha, "local", "locais", "armazenamento"), "Estoque Principal")
             quantidade = _to_int(_valor_linha(linha, "quantidade", "qtd"), 0)
             estoque_minimo = _to_int(_valor_linha(linha, "estoque_minimo", "estoque mínimo", "limite_estoque_baixo"), 0)
             status = _texto_padrao(_valor_linha(linha, "status"), "Ativo")
             descricao = None if _valor_vazio(_valor_linha(linha, "descricao", "descrição")) else _valor_linha(linha, "descricao", "descrição")
 
-            if not Categoria.query.filter_by(nome=categoria).first():
-                db.session.add(Categoria(nome=categoria, descricao="Importado da planilha", status="Ativo"))
+            if not Equipamento.query.filter_by(nome=equipamento).first():
+                db.session.add(Equipamento(nome=equipamento, descricao="Importado da planilha", status="Ativo"))
             if tipo_produto and not TipoProduto.query.filter_by(nome=tipo_produto).first():
                 db.session.add(TipoProduto(nome=tipo_produto, descricao="Importado da planilha", status="Ativo"))
             if not Local.query.filter_by(nome=local).first():
@@ -921,7 +991,7 @@ def importar_planilha():
 
             if produto:
                 produto.nome = nome
-                produto.categoria = categoria
+                produto.equipamento = equipamento
                 produto.tipo_produto = tipo_produto
                 produto.local = local
                 produto.quantidade = quantidade
@@ -934,7 +1004,7 @@ def importar_planilha():
                 produto = Produto(
                     sku=sku,
                     nome=nome,
-                    categoria=categoria,
+                    equipamento=equipamento,
                     tipo_produto=tipo_produto,
                     local=local,
                     quantidade=quantidade,
@@ -976,13 +1046,13 @@ def apagar_dados_importados():
                     skus.add(sku)
 
         if not skus:
-            categorias_importadas = [c.nome for c in Categoria.query.filter_by(descricao="Importado da planilha").all()]
+            equipamentos_importadas = [c.nome for c in Equipamento.query.filter_by(descricao="Importado da planilha").all()]
             tipos_importados = [t.nome for t in TipoProduto.query.filter_by(descricao="Importado da planilha").all()]
             locais_importados = [l.nome for l in Local.query.filter_by(descricao="Importado da planilha").all()]
             produtos = Produto.query.filter(
                 or_(
                     Produto.sku.like("AUTO-%"),
-                    Produto.categoria.in_(categorias_importadas or ["__sem_categoria_importada__"]),
+                    Produto.equipamento.in_(equipamentos_importadas or ["__sem_equipamento_importada__"]),
                     Produto.tipo_produto.in_(tipos_importados or ["__sem_tipo_importado__"]),
                     Produto.local.in_(locais_importados or ["__sem_local_importado__"]),
                 )
@@ -1001,9 +1071,9 @@ def apagar_dados_importados():
 
         ImportacaoPlanilha.query.delete()
 
-        for categoria in Categoria.query.filter_by(descricao="Importado da planilha").all():
-            if not Produto.query.filter_by(categoria=categoria.nome).first():
-                db.session.delete(categoria)
+        for equipamento in Equipamento.query.filter_by(descricao="Importado da planilha").all():
+            if not Produto.query.filter_by(equipamento=equipamento.nome).first():
+                db.session.delete(equipamento)
         for tipo in TipoProduto.query.filter_by(descricao="Importado da planilha").all():
             if not Produto.query.filter_by(tipo_produto=tipo.nome).first():
                 db.session.delete(tipo)
@@ -1022,23 +1092,23 @@ def apagar_dados_importados():
 
 @main.route("/seed")
 def seed():
-    _garantir_categorias_padrao()
+    _garantir_equipamentos_padrao()
     _garantir_tipos_padrao()
     _garantir_locais_padrao()
     if Produto.query.count() == 0:
         exemplos = [
-            ("MPC20152", "Memoria Smart PC2 1RX8 1GB"),
-            ("MPC20151", "Memoria Smart PC2 1RX8 1GB"),
-            ("MPC22433", "Memoria Smart PC2 1RX4 1GB"),
-            ("MPC20142", "Memoria Markvision PC2 1GB"),
-            ("MPC20150", "Memoria Kingston PC2 1GB"),
+            ("MPC20152", "Memória Smart PC2 1RX8 1GB"),
+            ("MPC20151", "Memória Smart PC2 1RX8 1GB"),
+            ("MPC22433", "Memória Smart PC2 1RX4 1GB"),
+            ("MPC20142", "Memória Markvision PC2 1GB"),
+            ("MPC20150", "Memória Kingston PC2 1GB"),
         ]
         for sku, nome in exemplos:
             produto = Produto(
                 sku=sku,
                 nome=nome,
-                categoria="Periferico",
-                tipo_produto="Memoria",
+                equipamento="Periférico",
+                tipo_produto="Memória",
                 local="EP-Prateleira 3C",
                 quantidade=1,
                 estoque_minimo=1,

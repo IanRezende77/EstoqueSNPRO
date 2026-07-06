@@ -35,10 +35,11 @@ def create_app():
 
     db.init_app(app)
 
-    from .routes import main
+    from .routes import main, _aplicar_correcoes_padrao
     app.register_blueprint(main)
 
     with app.app_context():
         db.create_all()
+        _aplicar_correcoes_padrao()
 
     return app
