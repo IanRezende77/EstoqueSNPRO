@@ -1,5 +1,6 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, Response
+from flask import Blueprint, render_template, request, redirect, url_for, flash, Response, session
 from sqlalchemy import or_, func
+import os
 import csv
 from io import StringIO
 from unicodedata import normalize
@@ -27,6 +28,46 @@ LOCAIS_PADRAO = [
     ("EP-Prateleira 3B", "Estoque Principal", "Prateleira intermediária do estoque"),
     ("EP-Prateleira 3C", "Estoque Principal", "Prateleira superior do estoque"),
 ]
+
+LOGIN_EMAIL = os.getenv("LOGIN_EMAIL", "euler.junior@snpro.com.br")
+LOGIN_PASSWORD = os.getenv("LOGIN_PASSWORD", "EstoqueEuler2026")
+
+
+@main.before_request
+def exigir_login():
+    rotas_livres = {"main.login", "static"}
+    if request.endpoint in rotas_livres or request.endpoint is None:
+        return None
+    if session.get("usuario_logado") == LOGIN_EMAIL:
+        return None
+    return redirect(url_for("main.login", next=request.full_path))
+
+
+@main.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("usuario_logado") == LOGIN_EMAIL:
+        return redirect(url_for("main.dashboard"))
+
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        senha = request.form.get("senha") or ""
+
+        if email == LOGIN_EMAIL.lower() and senha == LOGIN_PASSWORD:
+            session.clear()
+            session["usuario_logado"] = LOGIN_EMAIL
+            proxima = request.args.get("next") or url_for("main.dashboard")
+            return redirect(proxima)
+
+        flash("Email ou senha inválidos.", "danger")
+
+    return render_template("login.html")
+
+
+@main.route("/logout")
+def logout():
+    session.clear()
+    flash("Você saiu do sistema.", "success")
+    return redirect(url_for("main.login"))
 
 
 def _int_form(nome_campo, valor_padrao=0):
