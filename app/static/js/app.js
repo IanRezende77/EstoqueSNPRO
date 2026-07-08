@@ -173,6 +173,10 @@ function openMovementEditModal(button) {
 
 function closeMovementEditModal() { hideModal("modalMovementEdit"); }
 
+function printReport() {
+    window.print();
+}
+
 document.addEventListener("change", function(event) {
     if (event.target && event.target.id === "arquivoImportacao") {
         const label = document.getElementById("arquivoImportacaoNome");
