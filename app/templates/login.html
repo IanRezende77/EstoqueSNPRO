@@ -3,22 +3,19 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Login | SNPro Estoque</title>
+    <title>Login - SNPro Estoque</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body class="login-page">
-    <main class="login-wrapper">
-        <section class="login-card">
+    <main class="login-shell">
+        <section class="login-panel">
             <div class="login-brand">
-                <span class="brand-icon">SN</span>
-                <div>
-                    <strong>SNPRO</strong>
-                    <small>ESTOQUE</small>
-                </div>
+                <strong>SNPRO</strong>
+                <small>ESTOQUE</small>
             </div>
 
-            <h1>Acessar aplicação</h1>
-            <p>Entre com o email e senha autorizados para acessar o EstoqueMaster.</p>
+            <h1>Acessar sistema</h1>
+            <p>Entre com seu usuario para continuar.</p>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
@@ -30,15 +27,16 @@
                 {% endif %}
             {% endwith %}
 
-            <form method="post" class="login-form">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email" placeholder="Digite seu email" required autofocus>
+            <form method="post" class="product-form login-form">
+                <label>E-mail</label>
+                <input type="email" name="email" placeholder="admin@snpro.local" required autofocus>
 
-                <label for="senha">Senha</label>
-                <input type="password" id="senha" name="senha" placeholder="Digite sua senha" required>
+                <label>Senha</label>
+                <input type="password" name="senha" placeholder="Sua senha" required>
 
-                <button type="submit">Entrar</button>
+                <button class="btn-primary full" type="submit">Entrar</button>
             </form>
+
         </section>
     </main>
 </body>
